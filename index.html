@@ -148,7 +148,7 @@
   <section class="ctl">
     <div class="seg" id="types" role="group" aria-label="Scan type"></div>
     <div class="row">
-      <input id="manual" inputmode="text" autocomplete="off" placeholder="Type the 14-character scan ID" maxlength="40">
+      <input id="manual" inputmode="text" autocomplete="off" placeholder="Type the scan ID" maxlength="60">
       <button class="btn solid" id="manualAdd">Add</button>
     </div>
     <div class="row">
@@ -280,8 +280,8 @@ function uid() {
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
 
-/* Scan IDs are exactly 14 letters or numbers. */
-const ID_PATTERN = /^[A-Za-z0-9]{14}$/;
+/* Scan IDs are letters and numbers only, any length. */
+const ID_PATTERN = /^[A-Za-z0-9]+$/;
 let lastInvalid = '', lastInvalidAt = 0;
 
 function addScan(raw, format, via) {
@@ -293,7 +293,7 @@ function addScan(raw, format, via) {
     lastInvalid = barcode; lastInvalidAt = now;
     beep(300, 220);
     if (navigator.vibrate) navigator.vibrate([150, 80, 150]);
-    toast('Not saved: "' + barcode.slice(0, 30) + '" has ' + barcode.length + ' characters. Scan IDs are 14 letters or numbers.');
+    toast('Not saved: "' + barcode.slice(0, 30) + '" has symbols in it. Scan IDs use only letters and numbers.');
     return false;
   }
   if (!profile) { openProfile(); toast('Add your details first, then scan.'); return false; }
