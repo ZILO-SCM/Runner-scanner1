@@ -49,9 +49,20 @@
   /* Camera, framed in hazard tape */
   .frame { margin: 14px; padding: 6px; border-radius: 14px;
            background: repeating-linear-gradient(-45deg, var(--tape) 0 14px, var(--ink) 14px 28px); }
-  .cam { position: relative; background: #000; border-radius: 9px; overflow: hidden; min-height: 240px; }
-  #cam { width: 100%; }
-  #cam video { display: block; width: 100% !important; }
+  .sticky { position: sticky; top: 0; z-index: 10; background: var(--wash); padding: env(safe-area-inset-top, 0px) 0 10px; }
+  .sticky .frame { margin-top: 10px; }
+  .cam { position: relative; background: #000; border-radius: 9px; overflow: hidden; height: min(34vh, 300px); }
+  #cam { width: 100%; height: 100%; }
+  #cam video { display: block; width: 100% !important; height: 100% !important; object-fit: cover; }
+  /* Big result flash over the camera */
+  .cam-flash { position: absolute; inset: 0; z-index: 8; display: flex; flex-direction: column; align-items: center; justify-content: center;
+               gap: 4px; padding: 12px; text-align: center; color: #fff; opacity: 0; pointer-events: none; transition: opacity .15s; }
+  .cam-flash.show { opacity: 1; }
+  .cam-flash.ok { background: rgba(11,122,67,.88); }
+  .cam-flash.wait { background: rgba(22,32,74,.82); }
+  .cam-flash.bad { background: rgba(179,38,30,.9); }
+  .cam-flash .ft { font-family: var(--cond); font-weight: 700; font-size: 38px; line-height: 1; }
+  .cam-flash .fc { font-family: var(--cond); font-weight: 600; font-size: 20px; word-break: break-all; opacity: .95; }
   .cam-idle { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
               gap: 12px; color: #fff; text-align: center; padding: 20px; }
   .cam-idle[hidden] { display: none; }
@@ -119,7 +130,7 @@
            opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; }
   .toast.show { opacity: 1; }
   #filereader { display: none; }
-  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .toast, .cam-flash { transition: none; } }
 </style>
 </head>
 <body>
@@ -131,6 +142,7 @@
 
   <div class="banner" id="banner" hidden></div>
 
+  <div class="sticky">
   <div class="frame">
     <div class="cam">
       <div id="cam"></div>
@@ -140,10 +152,12 @@
       </div>
       <button class="cam-stop" id="camStop" hidden>Stop camera</button>
       <div class="cam-tools" id="camTools" hidden></div>
+      <div class="cam-flash" id="camFlash" aria-hidden="true"><div class="ft" id="flashTitle"></div><div class="fc" id="flashCode"></div></div>
     </div>
   </div>
 
   <section class="last" id="last" aria-live="polite"><div class="empty">Your latest scan shows here.</div></section>
+  </div>
 
   <section class="ctl">
     <div class="seg" id="types" role="group" aria-label="Scan type"></div>
@@ -220,7 +234,8 @@ function call(fn, a, b) {
 
 /* ---------- Upload queue ---------- */
 let syncing = false, retryTimer = null, backoff = 0, syncSoon = null;
-const DELAYS = [5, 15, 30, 60, 120];
+const DELAYS = [3, 10, 30, 60, 120];
+const FAIL_AFTER = 3; // show red only after this many failed attempts
 
 function save() {
   const unsaved = scans.filter(s => s.status !== 'saved');
@@ -259,6 +274,7 @@ async function sync() {
     if (!res || !res.ok) throw new Error((res && res.error) || 'Sheet did not confirm the upload');
     const ok = new Set(res.saved || []);
     scans.forEach(s => { if (ok.has(s.id)) { s.status = 'saved'; s.error = ''; } });
+    if (scans[0] && ok.has(scans[0].id)) { flash('ok', 'Saved ✓', scans[0].barcode); beep(1650, 70); beep(1950, 90, 0.09); }
     const missed = batch.filter(s => !ok.has(s.id));
     save();
     syncing = false;
@@ -267,9 +283,20 @@ async function sync() {
   } catch (e) {
     syncing = false;
     markFailed(batch, errText(e));
+    if (scans[0] && scans[0].status === 'failed' && scans[0].attempts >= FAIL_AFTER) flash('bad', 'Not uploaded yet', 'Kept on phone. Retrying.');
     scheduleRetry();
   }
   render();
+}
+
+let flashTimer = null;
+function flash(kind, title, code) {
+  const f = $('camFlash');
+  f.className = 'cam-flash show ' + kind;
+  $('flashTitle').textContent = title;
+  $('flashCode').textContent = code || '';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => f.classList.remove('show'), kind === 'ok' ? 1500 : kind === 'bad' ? 2500 : 4000);
 }
 
 function queueSync() { clearTimeout(syncSoon); syncSoon = setTimeout(sync, 400); }
@@ -294,6 +321,7 @@ function addScan(raw, format, via) {
     beep(300, 220);
     if (navigator.vibrate) navigator.vibrate([150, 80, 150]);
     toast('Not saved: "' + barcode.slice(0, 30) + '" has symbols in it. Scan IDs use only letters and numbers.');
+    flash('bad', 'Not saved', 'Code has symbols. Scan again.');
     return false;
   }
   if (!profile) { openProfile(); toast('Add your details first, then scan.'); return false; }
@@ -308,6 +336,7 @@ function addScan(raw, format, via) {
   $('note').value = '';
   save();
   feedback(!!prev);
+  flash('wait', prev ? 'Repeat scan. Uploading…' : 'Scanned. Uploading…', barcode);
   if (prev) toast('Already scanned at ' + hhmm(prev.t) + '. Saved again and marked as a repeat.');
   render();
   queueSync();
@@ -454,15 +483,19 @@ async function scanPhoto(file) {
 /* ---------- Rendering ---------- */
 function hhmm(t) { const d = new Date(t); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
-const LABEL = { saved: ['ok', 'Saved'], pending: ['wait', 'Waiting'], failed: ['bad', 'Failed'] };
+function stateOf(s) {
+  if (s.status === 'saved') return ['ok', 'Saved'];
+  if (s.status === 'pending') return ['wait', 'Uploading'];
+  return (s.attempts || 0) >= FAIL_AFTER ? ['bad', 'Failed'] : ['wait', 'Retrying'];
+}
 
 function render() {
   // Header
   $('whoName').textContent = profile ? profile.name + ' (' + profile.id + ')' : 'Set up runner';
   $('whoHub').textContent = profile ? profile.hub + ' hub' : 'Tap to add your details';
 
-  const failed = scans.filter(s => s.status === 'failed').length;
-  const waiting = scans.filter(s => s.status === 'pending').length;
+  const failed = scans.filter(s => s.status === 'failed' && (s.attempts || 0) >= FAIL_AFTER).length;
+  const waiting = scans.filter(s => s.status !== 'saved').length - failed;
   const pill = $('pill');
   if (syncing) { pill.className = 'pill wait'; pill.textContent = 'Uploading ' + (failed + waiting) + '…'; }
   else if (failed) { pill.className = 'pill bad'; pill.textContent = failed + ' not uploaded. Retry'; }
@@ -490,10 +523,10 @@ function render() {
   const s0 = scans[0];
   if (!s0) { last.className = 'last'; last.appendChild(el('div', 'empty', 'Your latest scan shows here.')); }
   else {
-    const [cls] = LABEL[s0.status];
+    const [cls, word] = stateOf(s0);
     last.className = 'last ' + cls;
     last.appendChild(el('div', 'code', s0.barcode));
-    const msg = s0.status === 'saved' ? 'Saved to sheet' : s0.status === 'pending' ? 'Uploading to sheet…' : 'Not uploaded yet: ' + s0.error + ' Retrying.';
+    const msg = word === 'Saved' ? 'Saved to sheet ✓' : word === 'Uploading' ? 'Uploading to sheet…' : word === 'Retrying' ? 'Retrying upload…' : 'Not uploaded yet: ' + s0.error + ' Kept on phone, retrying.';
     last.appendChild(el('div', 'state', msg + (s0.repeatAt ? ' (repeat scan)' : '')));
   }
 
@@ -504,7 +537,7 @@ function render() {
   const box = $('items'); box.textContent = '';
   if (!today.length) { box.appendChild(el('div', 'none', 'No scans yet today. Start the camera or type a code to add one.')); return; }
   today.slice(0, 150).forEach(s => {
-    const [cls, word] = LABEL[s.status];
+    const [cls, word] = stateOf(s);
     const row = el('div', 'item');
     row.appendChild(el('time', '', hhmm(s.t)));
     const mid = el('div');
@@ -512,7 +545,7 @@ function render() {
     const meta = el('div', 'meta', s.type + ', ' + s.hub + (s.notes ? '. Note: ' + s.notes : ''));
     if (s.repeatAt) { meta.appendChild(document.createTextNode(' ')); meta.appendChild(el('span', 'repeat', 'Repeat')); }
     mid.appendChild(meta);
-    if (s.status === 'failed' && s.error) mid.appendChild(el('div', 'err', s.error));
+    if (word === 'Failed' && s.error) mid.appendChild(el('div', 'err', s.error));
     row.appendChild(mid);
     row.appendChild(el('span', 'tag ' + cls, word));
     box.appendChild(row);
@@ -571,10 +604,10 @@ setInterval(() => { if (!syncing && scans.some(s => s.status !== 'saved')) sync(
 
 render();
 if (!profile) openProfile();
+// Load settings first: this also wakes the script up, so the first upload doesn't hit a cold start.
 call('getConfig').then(c => {
   if (c && c.ok) { config = { hubs: c.hubs, types: c.types, needsCode: c.needsCode }; store.set('zr_config', config); render(); }
-}).catch(() => {});
-sync();
+}).catch(() => {}).then(() => sync());
 </script>
 </body>
 </html>
