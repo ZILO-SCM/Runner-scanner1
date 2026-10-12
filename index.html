@@ -142,7 +142,7 @@
   <section class="ctl">
     <div class="seg" id="types" role="group" aria-label="Scan type"></div>
     <div class="row">
-      <input id="manual" inputmode="text" autocomplete="off" placeholder="Type or use a handheld scanner">
+      <input id="manual" inputmode="text" autocomplete="off" placeholder="Type the 14-character scan ID" maxlength="40">
       <button class="btn solid" id="manualAdd">Add</button>
     </div>
     <div class="row">
@@ -274,10 +274,23 @@ function uid() {
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
 
+/* Scan IDs are exactly 14 letters or numbers. */
+const ID_PATTERN = /^[A-Za-z0-9]{14}$/;
+let lastInvalid = '', lastInvalidAt = 0;
+
 function addScan(raw, format, via) {
-  const barcode = String(raw || '').trim();
-  if (!barcode) return;
-  if (!profile) { openProfile(); toast('Add your details first, then scan.'); return; }
+  const barcode = String(raw || '').replace(/\s+/g, '');
+  if (!barcode) return false;
+  if (!ID_PATTERN.test(barcode)) {
+    const now = Date.now();
+    if (via === 'camera' && barcode === lastInvalid && now - lastInvalidAt < 4000) return false;
+    lastInvalid = barcode; lastInvalidAt = now;
+    beep(300, 220);
+    if (navigator.vibrate) navigator.vibrate([150, 80, 150]);
+    toast('Not saved: "' + barcode.slice(0, 30) + '" has ' + barcode.length + ' characters. Scan IDs are 14 letters or numbers.');
+    return false;
+  }
+  if (!profile) { openProfile(); toast('Add your details first, then scan.'); return false; }
   const prev = scans.find(s => s.barcode === barcode && Date.now() - s.t < 24 * 3600 * 1000);
   const s = {
     id: uid(), barcode, format: format || '', type: scanType, hub: profile.hub,
@@ -292,6 +305,7 @@ function addScan(raw, format, via) {
   if (prev) toast('Already scanned at ' + hhmm(prev.t) + '. Saved again and marked as a repeat.');
   render();
   queueSync();
+  return true;
 }
 
 /* ---------- Beep and buzz ---------- */
@@ -482,7 +496,7 @@ $('pSave').onclick = saveProfile;
 $('pill').onclick = () => { backoff = 0; sync(); };
 $('camStart').onclick = startCamera;
 $('camStop').onclick = stopCamera;
-$('manualAdd').onclick = () => { addScan($('manual').value, 'typed', 'typed'); $('manual').value = ''; $('manual').focus(); };
+$('manualAdd').onclick = () => { if (addScan($('manual').value, 'typed', 'typed')) $('manual').value = ''; $('manual').focus(); };
 $('manual').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('manualAdd').click(); } });
 $('photo').addEventListener('change', e => scanPhoto(e.target.files && e.target.files[0]));
 window.addEventListener('online', () => { backoff = 0; render(); sync(); });
