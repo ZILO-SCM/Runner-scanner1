@@ -179,7 +179,7 @@
 
 <script>
 /* Only needed if you host this page outside Apps Script: paste your /exec URL here. */
-const ENDPOINT = 'https://hiyag-cmyk.github.io/Runner-scanner/';
+const ENDPOINT = 'https://script.google.com/macros/s/AKfycbyyhF77vsdRkCDnpGaji0wyNDHJDcUWG3mslHG4k5nMMX_ao5p2325UWsjiUoOEtqp_/exec';
 
 const GAS = typeof google !== 'undefined' && google.script && google.script.run;
 const $ = id => document.getElementById(id);
@@ -317,8 +317,7 @@ let reader = null, camOn = false, lastText = '', lastAt = 0, wakeLock = null;
 function formats() {
   const F = window.Html5QrcodeSupportedFormats;
   if (!F) return undefined;
-  return [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX, F.PDF_417]
-    .filter(x => x !== undefined);
+  return [F.CODE_128, F.QR_CODE].filter(x => x !== undefined);
 }
 
 async function startCamera() {
@@ -348,9 +347,12 @@ async function stopCamera() {
   if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
 }
 
+let candidate = '', candidateAt = 0;
 function onDecode(text, result) {
   const now = Date.now();
-  if (text === lastText && now - lastAt < 2500) return; // same label still in view
+  if (text !== candidate || now - candidateAt > 1500) { candidate = text; candidateAt = now; return; } // wait for a 2nd matching read
+  candidate = '';
+  if (text === lastText && now - lastAt < 8000) return; // same label still in view
   lastText = text; lastAt = now;
   const fmt = result && result.result && result.result.format ? result.result.format.formatName : '';
   addScan(text, fmt, 'camera');
