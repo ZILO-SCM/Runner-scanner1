@@ -60,6 +60,11 @@
   .cam-stop { position: absolute; right: 8px; top: 8px; z-index: 5; background: rgba(0,0,0,.6); color: #fff; border: 0;
               border-radius: 8px; padding: 6px 10px; font-size: 14px; }
   .cam-stop[hidden] { display: none; }
+  .cam-tools { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 5; display: flex; gap: 6px; }
+  .cam-tools[hidden] { display: none; }
+  .cam-tools button { background: rgba(0,0,0,.6); color: #fff; border: 0; border-radius: 8px; padding: 9px 13px; font-weight: 600; font-size: 15px; }
+  .cam-tools button[aria-pressed="true"] { background: var(--tape); color: var(--ink); }
+  .cam-tools .light { margin-left: auto; }
 
   /* Last scan readout */
   .last { margin: 0 14px; background: var(--paper); border-radius: 12px; padding: 12px 14px; border-left: 8px solid var(--line); }
@@ -134,6 +139,7 @@
         <p id="camMsg">Point the camera at the barcode. It saves on its own.</p>
       </div>
       <button class="cam-stop" id="camStop" hidden>Stop camera</button>
+      <div class="cam-tools" id="camTools" hidden></div>
     </div>
   </div>
 
@@ -341,9 +347,20 @@ async function startCamera() {
   try {
     reader = reader || new Html5Qrcode('cam', { formatsToSupport: formats(), verbose: false,
       experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
-    await reader.start({ facingMode: 'environment' },
-      { fps: 12, qrbox: (w, h) => ({ width: Math.floor(w * 0.88), height: Math.floor(Math.min(h * 0.6, w * 0.55)) }) },
-      onDecode, () => {});
+    const cfg = {
+      fps: 10,
+      // Big scan area so a label doesn't need to be lined up exactly
+      qrbox: (w, h) => ({ width: Math.floor(w * 0.94), height: Math.floor(Math.min(h * 0.75, w * 0.65)) }),
+      // Full-HD video: small or far-away barcodes keep enough detail to read
+      videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    };
+    try {
+      await reader.start({ facingMode: 'environment' }, cfg, onDecode, () => {});
+    } catch (hdErr) {
+      delete cfg.videoConstraints; // older phones: fall back to the default camera size
+      await reader.start({ facingMode: 'environment' }, cfg, onDecode, () => {});
+    }
+    setupCamTools();
     camOn = true;
     $('camIdle').hidden = true; $('camStop').hidden = false;
     try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
@@ -353,10 +370,55 @@ async function startCamera() {
   }
 }
 
+async function setupCamTools() {
+  const box = $('camTools'); box.textContent = '';
+  try { await reader.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
+  let caps = null;
+  try { caps = reader.getRunningTrackCameraCapabilities(); } catch (e) {}
+  if (caps) {
+    try {
+      const z = caps.zoomFeature();
+      if (z.isSupported()) {
+        const levels = [1, 2, 3, 4].filter(v => v >= z.min() && v <= z.max());
+        if (levels.length > 1) {
+          let saved = store.get('zr_zoom', 1);
+          if (!levels.includes(saved)) saved = levels[0];
+          levels.forEach(v => {
+            const b = el('button', 'zoom', v + 'x');
+            b.setAttribute('aria-pressed', String(v === saved));
+            b.setAttribute('aria-label', 'Zoom ' + v + ' times');
+            b.onclick = async () => {
+              try {
+                await z.apply(v); store.set('zr_zoom', v);
+                box.querySelectorAll('.zoom').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+              } catch (e) {}
+            };
+            box.appendChild(b);
+          });
+          if (saved !== 1) { try { await z.apply(saved); } catch (e) {} }
+        }
+      }
+    } catch (e) {}
+    try {
+      const t = caps.torchFeature();
+      if (t.isSupported()) {
+        const b = el('button', 'light', 'Light');
+        b.setAttribute('aria-pressed', 'false');
+        b.onclick = async () => {
+          const on = b.getAttribute('aria-pressed') !== 'true';
+          try { await t.apply(on); b.setAttribute('aria-pressed', String(on)); } catch (e) {}
+        };
+        box.appendChild(b);
+      }
+    } catch (e) {}
+  }
+  box.hidden = !box.children.length;
+}
+
 async function stopCamera() {
   if (reader && camOn) { try { await reader.stop(); } catch (e) {} }
   camOn = false;
-  $('camIdle').hidden = false; $('camStop').hidden = true;
+  $('camIdle').hidden = false; $('camStop').hidden = true; $('camTools').hidden = true;
   $('camMsg').textContent = 'Point the camera at the barcode. It saves on its own.';
   if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
 }
@@ -364,7 +426,7 @@ async function stopCamera() {
 let candidate = '', candidateAt = 0;
 function onDecode(text, result) {
   const now = Date.now();
-  if (text !== candidate || now - candidateAt > 1500) { candidate = text; candidateAt = now; return; } // wait for a 2nd matching read
+  if (text !== candidate || now - candidateAt > 2000) { candidate = text; candidateAt = now; return; } // wait for a 2nd matching read
   candidate = '';
   if (text === lastText && now - lastAt < 8000) return; // same label still in view
   lastText = text; lastAt = now;
