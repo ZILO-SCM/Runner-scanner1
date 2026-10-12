@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16204A">
+<title>Zilo Runner Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --ink: #16204A;
+    --paper: #FFFFFF;
+    --wash: #F2F4F8;
+    --line: #D9DCE6;
+    --muted: #5B6275;
+    --tape: #FFCC00;
+    --ok: #0B7A43;  --ok-bg: #E3F4EA;
+    --wait: #7A5200; --wait-bg: #FFF1C2;
+    --bad: #B3261E; --bad-bg: #FBE4E2;
+    --body: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --cond: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--wash); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.4; }
+  body { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--tape); outline-offset: 2px; }
+  .wrap { max-width: 520px; margin: 0 auto; }
+
+  /* Top bar */
+  .bar { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--ink); color: #fff;
+         padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
+  .who { flex: 1; min-width: 0; background: none; border: 0; color: inherit; text-align: left; padding: 0; }
+  .who b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who span { font-size: 13px; opacity: .8; }
+  .pill { border: 0; border-radius: 999px; padding: 7px 12px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.wait { background: var(--wait-bg); color: var(--wait); }
+  .pill.bad { background: var(--bad); color: #fff; }
+
+  .banner { margin: 10px 14px 0; padding: 10px 12px; border-radius: 8px; background: var(--bad-bg); color: var(--bad); font-size: 14px; }
+  .banner[hidden] { display: none; }
+
+  /* Camera, framed in hazard tape */
+  .frame { margin: 14px; padding: 6px; border-radius: 14px;
+           background: repeating-linear-gradient(-45deg, var(--tape) 0 14px, var(--ink) 14px 28px); }
+  .cam { position: relative; background: #000; border-radius: 9px; overflow: hidden; min-height: 240px; }
+  #cam { width: 100%; }
+  #cam video { display: block; width: 100% !important; }
+  .cam-idle { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+              gap: 12px; color: #fff; text-align: center; padding: 20px; }
+  .cam-idle[hidden] { display: none; }
+  .cam-idle p { margin: 0; max-width: 32ch; font-size: 15px; opacity: .85; }
+  .big { background: var(--tape); color: var(--ink); border: 0; border-radius: 10px; padding: 14px 22px; font-weight: 600; font-size: 18px; }
+  .cam-stop { position: absolute; right: 8px; top: 8px; z-index: 5; background: rgba(0,0,0,.6); color: #fff; border: 0;
+              border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+  .cam-stop[hidden] { display: none; }
+
+  /* Last scan readout */
+  .last { margin: 0 14px; background: var(--paper); border-radius: 12px; padding: 12px 14px; border-left: 8px solid var(--line); }
+  .last.ok { border-left-color: var(--ok); }
+  .last.wait { border-left-color: var(--tape); }
+  .last.bad { border-left-color: var(--bad); }
+  .last .code { font-family: var(--cond); font-weight: 700; font-size: 30px; line-height: 1.1; letter-spacing: .02em; word-break: break-all; }
+  .last .state { font-size: 15px; font-weight: 500; margin-top: 2px; }
+  .last.ok .state { color: var(--ok); } .last.wait .state { color: var(--wait); } .last.bad .state { color: var(--bad); }
+  .last .empty { color: var(--muted); }
+
+  /* Controls */
+  .ctl { margin: 14px; display: grid; gap: 12px; }
+  .seg { display: flex; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; overflow-x: auto; }
+  .seg button { flex: 1 0 auto; border: 0; background: none; padding: 10px 12px; border-radius: 8px; font-weight: 500; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--paper); }
+  .btn { border: 1px solid var(--ink); background: var(--paper); border-radius: 10px; padding: 12px 14px; font-weight: 600; white-space: nowrap; }
+  .btn.solid { background: var(--ink); color: #fff; }
+  .hint { font-size: 13px; color: var(--muted); margin: -4px 2px 0; }
+
+  /* Today's list */
+  .list { margin: 18px 14px 28px; }
+  .list h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; display: flex; justify-content: space-between; }
+  .list h2 span { font-weight: 400; color: var(--muted); }
+  .item { display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: start; background: var(--paper);
+          border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; }
+  .item time { font-size: 13px; color: var(--muted); padding-top: 3px; }
+  .item .bc { font-family: var(--cond); font-weight: 600; font-size: 19px; word-break: break-all; line-height: 1.2; }
+  .item .meta { font-size: 13px; color: var(--muted); }
+  .item .err { font-size: 13px; color: var(--bad); }
+  .tag { font-size: 12px; font-weight: 600; border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
+  .tag.ok { background: var(--ok-bg); color: var(--ok); }
+  .tag.wait { background: var(--wait-bg); color: var(--wait); }
+  .tag.bad { background: var(--bad-bg); color: var(--bad); }
+  .repeat { color: var(--wait); font-weight: 600; }
+  .none { color: var(--muted); font-size: 15px; padding: 8px 2px; }
+
+  /* Profile dialog */
+  dialog { border: 0; border-radius: 14px; padding: 0; width: min(440px, calc(100vw - 24px)); color: var(--ink); }
+  dialog::backdrop { background: rgba(22,32,74,.55); }
+  .dlg { padding: 18px; display: grid; gap: 12px; }
+  .dlg h1 { margin: 0; font-family: var(--cond); font-size: 26px; }
+  .dlg p { margin: 0; color: var(--muted); font-size: 14px; }
+  .dlg label { display: grid; gap: 4px; font-size: 14px; font-weight: 500; }
+  .dlg input, .dlg select { border: 1px solid var(--line); border-radius: 10px; padding: 11px; background: #fff; }
+  .dlg .err { color: var(--bad); font-size: 14px; min-height: 1em; }
+
+  .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+           background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 15px; max-width: calc(100vw - 28px);
+           opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; }
+  .toast.show { opacity: 1; }
+  #filereader { display: none; }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <button class="who" id="who" aria-label="Edit runner details"><b id="whoName">Set up runner</b><span id="whoHub">Tap to add your details</span></button>
+    <button class="pill ok" id="pill">All saved</button>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="frame">
+    <div class="cam">
+      <div id="cam"></div>
+      <div class="cam-idle" id="camIdle">
+        <button class="big" id="camStart">Start scanning</button>
+        <p id="camMsg">Point the camera at the barcode. It saves on its own.</p>
+      </div>
+      <button class="cam-stop" id="camStop" hidden>Stop camera</button>
+    </div>
+  </div>
+
+  <section class="last" id="last" aria-live="polite"><div class="empty">Your latest scan shows here.</div></section>
+
+  <section class="ctl">
+    <div class="seg" id="types" role="group" aria-label="Scan type"></div>
+    <div class="row">
+      <input id="manual" inputmode="text" autocomplete="off" placeholder="Type or use a handheld scanner">
+      <button class="btn solid" id="manualAdd">Add</button>
+    </div>
+    <div class="row">
+      <input id="note" autocomplete="off" placeholder="Note for next scan (optional)">
+      <label class="btn" for="photo">Scan a photo</label>
+      <input type="file" id="photo" accept="image/*" capture="environment" hidden>
+    </div>
+    <p class="hint">Scans are kept on this phone until the sheet confirms them, so nothing is lost without signal.</p>
+  </section>
+
+  <section class="list">
+    <h2>Today <span id="todayCount">0 scans</span></h2>
+    <div id="items"></div>
+  </section>
+</div>
+
+<div id="filereader"></div>
+
+<dialog id="profileDlg">
+  <div class="dlg">
+    <h1>Runner details</h1>
+    <p>These go into the sheet with every scan.</p>
+    <label>Name <input id="pName" autocomplete="name"></label>
+    <label>Runner ID <input id="pId" autocomplete="off"></label>
+    <label>Phone <input id="pPhone" inputmode="tel" autocomplete="tel"></label>
+    <label>Hub <select id="pHub"></select></label>
+    <label id="pCodeWrap" hidden>Team code <input id="pCode" autocomplete="off"></label>
+    <div class="err" id="pErr"></div>
+    <button class="big" id="pSave">Save details</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+/* Only needed if you host this page outside Apps Script: paste your /exec URL here. */
+const ENDPOINT = 'https://script.google.com/a/macros/zilo.one/s/AKfycbyyhF77vsdRkCDnpGaji0wyNDHJDcUWG3mslHG4k5nMMX_ao5p2325UWsjiUoOEtqp_/exec';
+
+const GAS = typeof google !== 'undefined' && google.script && google.script.run;
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+
+let config = store.get('zr_config', { hubs: ['Parel','Malad','Ghatkopar','Bandra','Thane','Vashi'], types: ['Pickup','Handover','Delivered','Return'], needsCode: false });
+let profile = store.get('zr_profile', null);
+let scans = store.get('zr_scans', []);
+let scanType = store.get('zr_type', config.types[0]);
+
+/* ---------- Server calls ---------- */
+function call(fn, a, b) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('No reply from the sheet in 45 seconds')), 45000);
+    const done = r => { clearTimeout(timer); resolve(r); };
+    const fail = e => { clearTimeout(timer); reject(e); };
+    if (GAS) {
+      google.script.run.withSuccessHandler(done).withFailureHandler(fail)[fn](a, b);
+    } else if (ENDPOINT) {
+      const req = fn === 'getConfig'
+        ? fetch(ENDPOINT + '?action=config')
+        : fetch(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ scans: a, code: b }) });
+      req.then(r => { if (!r.ok) throw new Error('Sheet replied with error ' + r.status); return r.json(); }).then(done, fail);
+    } else {
+      fail(new Error('This page is not connected to a sheet'));
+    }
+  });
+}
+
+/* ---------- Upload queue ---------- */
+let syncing = false, retryTimer = null, backoff = 0, syncSoon = null;
+const DELAYS = [5, 15, 30, 60, 120];
+
+function save() {
+  const unsaved = scans.filter(s => s.status !== 'saved');
+  const saved = scans.filter(s => s.status === 'saved').slice(0, 500);
+  scans = unsaved.concat(saved).sort((x, y) => y.t - x.t);
+  store.set('zr_scans', scans);
+}
+
+function errText(e) { return (e && (e.message || e)) ? String(e.message || e).slice(0, 140) : 'Unknown error'; }
+
+function markFailed(list, msg) {
+  const ids = new Set(list.map(s => s.id));
+  scans.forEach(s => { if (ids.has(s.id)) { s.status = 'failed'; s.error = msg; s.attempts = (s.attempts || 0) + 1; } });
+  save();
+}
+
+function scheduleRetry() {
+  clearTimeout(retryTimer);
+  const secs = DELAYS[Math.min(backoff, DELAYS.length - 1)];
+  backoff++;
+  retryTimer = setTimeout(sync, secs * 1000);
+}
+
+async function sync() {
+  if (syncing) return;
+  clearTimeout(retryTimer);
+  const batch = scans.filter(s => s.status !== 'saved').slice(-50); // oldest first
+  if (!batch.length) { backoff = 0; render(); return; }
+  if (!navigator.onLine) { markFailed(batch, 'Phone is offline. Will upload when signal is back.'); render(); scheduleRetry(); return; }
+
+  syncing = true; render();
+  try {
+    const payload = batch.map(s => ({ id: s.id, barcode: s.barcode, format: s.format, type: s.type, hub: s.hub,
+      runnerName: s.runnerName, runnerId: s.runnerId, phone: s.phone, notes: s.notes, scannedAt: s.scannedAt, source: s.via }));
+    const res = await call('saveScans', payload, (profile && profile.code) || '');
+    if (!res || !res.ok) throw new Error((res && res.error) || 'Sheet did not confirm the upload');
+    const ok = new Set(res.saved || []);
+    scans.forEach(s => { if (ok.has(s.id)) { s.status = 'saved'; s.error = ''; } });
+    const missed = batch.filter(s => !ok.has(s.id));
+    save();
+    syncing = false;
+    if (missed.length) { markFailed(missed, 'Sheet did not accept this scan'); scheduleRetry(); }
+    else { backoff = 0; if (scans.some(s => s.status !== 'saved')) setTimeout(sync, 300); }
+  } catch (e) {
+    syncing = false;
+    markFailed(batch, errText(e));
+    scheduleRetry();
+  }
+  render();
+}
+
+function queueSync() { clearTimeout(syncSoon); syncSoon = setTimeout(sync, 400); }
+
+/* ---------- Adding scans ---------- */
+function uid() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+function addScan(raw, format, via) {
+  const barcode = String(raw || '').trim();
+  if (!barcode) return;
+  if (!profile) { openProfile(); toast('Add your details first, then scan.'); return; }
+  const prev = scans.find(s => s.barcode === barcode && Date.now() - s.t < 24 * 3600 * 1000);
+  const s = {
+    id: uid(), barcode, format: format || '', type: scanType, hub: profile.hub,
+    runnerName: profile.name, runnerId: profile.id, phone: profile.phone || '',
+    notes: $('note').value.trim(), scannedAt: new Date().toISOString(), t: Date.now(),
+    status: 'pending', error: '', via, repeatAt: prev ? prev.t : null
+  };
+  scans.unshift(s);
+  $('note').value = '';
+  save();
+  feedback(!!prev);
+  if (prev) toast('Already scanned at ' + hhmm(prev.t) + '. Saved again and marked as a repeat.');
+  render();
+  queueSync();
+}
+
+/* ---------- Beep and buzz ---------- */
+let audio = null;
+function beep(freq, ms, at) {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = freq; o.connect(g); g.connect(audio.destination);
+    const t0 = audio.currentTime + (at || 0);
+    g.gain.setValueAtTime(0.2, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + ms / 1000);
+    o.start(t0); o.stop(t0 + ms / 1000);
+  } catch (e) {}
+}
+function feedback(isRepeat) {
+  if (isRepeat) { beep(520, 110); beep(520, 110, 0.16); if (navigator.vibrate) navigator.vibrate([80, 60, 80]); }
+  else { beep(1250, 90); if (navigator.vibrate) navigator.vibrate(50); }
+}
+
+/* ---------- Camera ---------- */
+let reader = null, camOn = false, lastText = '', lastAt = 0, wakeLock = null;
+
+function formats() {
+  const F = window.Html5QrcodeSupportedFormats;
+  if (!F) return undefined;
+  return [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.QR_CODE, F.DATA_MATRIX, F.PDF_417]
+    .filter(x => x !== undefined);
+}
+
+async function startCamera() {
+  if (!profile) { openProfile(); return; }
+  if (!window.Html5Qrcode) { $('camMsg').textContent = 'The scanner did not load. Check signal, or use Scan a photo or type the code.'; return; }
+  $('camMsg').textContent = 'Opening camera…';
+  try {
+    reader = reader || new Html5Qrcode('cam', { formatsToSupport: formats(), verbose: false,
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+    await reader.start({ facingMode: 'environment' },
+      { fps: 12, qrbox: (w, h) => ({ width: Math.floor(w * 0.88), height: Math.floor(Math.min(h * 0.6, w * 0.55)) }) },
+      onDecode, () => {});
+    camOn = true;
+    $('camIdle').hidden = true; $('camStop').hidden = false;
+    try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  } catch (e) {
+    camOn = false;
+    $('camMsg').textContent = 'The camera did not open (' + errText(e) + '). Allow camera access, or use Scan a photo.';
+  }
+}
+
+async function stopCamera() {
+  if (reader && camOn) { try { await reader.stop(); } catch (e) {} }
+  camOn = false;
+  $('camIdle').hidden = false; $('camStop').hidden = true;
+  $('camMsg').textContent = 'Point the camera at the barcode. It saves on its own.';
+  if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+}
+
+function onDecode(text, result) {
+  const now = Date.now();
+  if (text === lastText && now - lastAt < 2500) return; // same label still in view
+  lastText = text; lastAt = now;
+  const fmt = result && result.result && result.result.format ? result.result.format.formatName : '';
+  addScan(text, fmt, 'camera');
+}
+
+async function scanPhoto(file) {
+  if (!file) return;
+  if (!window.Html5Qrcode) { toast('The scanner did not load. Type the code instead.'); return; }
+  const wasOn = camOn;
+  if (wasOn) await stopCamera();
+  try {
+    const fr = new Html5Qrcode('filereader', { formatsToSupport: formats(), verbose: false });
+    const r = await fr.scanFileV2(file, false);
+    const fmt = r.result && r.result.format ? r.result.format.formatName : '';
+    addScan(r.decodedText, fmt, 'photo');
+  } catch (e) {
+    toast('No barcode found in that photo. Fill the frame with the label and try again.');
+  }
+  $('photo').value = '';
+  if (wasOn) startCamera();
+}
+
+/* ---------- Rendering ---------- */
+function hhmm(t) { const d = new Date(t); return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+const LABEL = { saved: ['ok', 'Saved'], pending: ['wait', 'Waiting'], failed: ['bad', 'Failed'] };
+
+function render() {
+  // Header
+  $('whoName').textContent = profile ? profile.name + ' (' + profile.id + ')' : 'Set up runner';
+  $('whoHub').textContent = profile ? profile.hub + ' hub' : 'Tap to add your details';
+
+  const failed = scans.filter(s => s.status === 'failed').length;
+  const waiting = scans.filter(s => s.status === 'pending').length;
+  const pill = $('pill');
+  if (syncing) { pill.className = 'pill wait'; pill.textContent = 'Uploading ' + (failed + waiting) + '…'; }
+  else if (failed) { pill.className = 'pill bad'; pill.textContent = failed + ' not uploaded. Retry'; }
+  else if (waiting) { pill.className = 'pill wait'; pill.textContent = waiting + ' waiting'; }
+  else { pill.className = 'pill ok'; pill.textContent = 'All saved'; }
+
+  // Banner
+  const banner = $('banner');
+  if (!GAS && !ENDPOINT) { banner.hidden = false; banner.textContent = 'This page is not connected to a sheet. Open it from your Apps Script web app link.'; }
+  else if (!navigator.onLine) { banner.hidden = false; banner.textContent = 'No signal. Keep scanning: scans upload when the phone is back online.'; }
+  else banner.hidden = true;
+
+  // Scan types
+  const seg = $('types'); seg.textContent = '';
+  if (!config.types.includes(scanType)) scanType = config.types[0];
+  config.types.forEach(t => {
+    const b = el('button', '', t);
+    b.setAttribute('aria-pressed', String(t === scanType));
+    b.onclick = () => { scanType = t; store.set('zr_type', t); render(); };
+    seg.appendChild(b);
+  });
+
+  // Last scan
+  const last = $('last'); last.textContent = '';
+  const s0 = scans[0];
+  if (!s0) { last.className = 'last'; last.appendChild(el('div', 'empty', 'Your latest scan shows here.')); }
+  else {
+    const [cls] = LABEL[s0.status];
+    last.className = 'last ' + cls;
+    last.appendChild(el('div', 'code', s0.barcode));
+    const msg = s0.status === 'saved' ? 'Saved to sheet' : s0.status === 'pending' ? 'Uploading to sheet…' : 'Not uploaded yet: ' + s0.error + ' Retrying.';
+    last.appendChild(el('div', 'state', msg + (s0.repeatAt ? ' (repeat scan)' : '')));
+  }
+
+  // Today's list
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const today = scans.filter(s => s.t >= start.getTime() || s.status !== 'saved');
+  $('todayCount').textContent = today.length + (today.length === 1 ? ' scan' : ' scans');
+  const box = $('items'); box.textContent = '';
+  if (!today.length) { box.appendChild(el('div', 'none', 'No scans yet today. Start the camera or type a code to add one.')); return; }
+  today.slice(0, 150).forEach(s => {
+    const [cls, word] = LABEL[s.status];
+    const row = el('div', 'item');
+    row.appendChild(el('time', '', hhmm(s.t)));
+    const mid = el('div');
+    mid.appendChild(el('div', 'bc', s.barcode));
+    const meta = el('div', 'meta', s.type + ', ' + s.hub + (s.notes ? '. Note: ' + s.notes : ''));
+    if (s.repeatAt) { meta.appendChild(document.createTextNode(' ')); meta.appendChild(el('span', 'repeat', 'Repeat')); }
+    mid.appendChild(meta);
+    if (s.status === 'failed' && s.error) mid.appendChild(el('div', 'err', s.error));
+    row.appendChild(mid);
+    row.appendChild(el('span', 'tag ' + cls, word));
+    box.appendChild(row);
+  });
+}
+
+let toastTimer = null;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+/* ---------- Profile ---------- */
+function fillHubs() {
+  const sel = $('pHub'); sel.textContent = '';
+  config.hubs.forEach(h => { const o = el('option', '', h); o.value = h; sel.appendChild(o); });
+}
+function openProfile() {
+  fillHubs();
+  $('pName').value = profile ? profile.name : '';
+  $('pId').value = profile ? profile.id : '';
+  $('pPhone').value = profile ? profile.phone : '';
+  $('pHub').value = profile && config.hubs.includes(profile.hub) ? profile.hub : config.hubs[0];
+  $('pCodeWrap').hidden = !config.needsCode;
+  $('pCode').value = profile ? (profile.code || '') : '';
+  $('pErr').textContent = '';
+  const d = $('profileDlg');
+  if (d.showModal) d.showModal(); else d.setAttribute('open', '');
+}
+function saveProfile() {
+  const p = { name: $('pName').value.trim(), id: $('pId').value.trim(), phone: $('pPhone').value.trim(),
+              hub: $('pHub').value, code: $('pCode').value.trim() };
+  if (!p.name || !p.id) { $('pErr').textContent = 'Add your name and runner ID to continue.'; return; }
+  if (config.needsCode && !p.code) { $('pErr').textContent = 'Add the team code from your lead.'; return; }
+  profile = p; store.set('zr_profile', p);
+  const d = $('profileDlg'); if (d.close) d.close(); else d.removeAttribute('open');
+  render(); queueSync();
+}
+
+/* ---------- Wire up ---------- */
+$('who').onclick = openProfile;
+$('pSave').onclick = saveProfile;
+$('pill').onclick = () => { backoff = 0; sync(); };
+$('camStart').onclick = startCamera;
+$('camStop').onclick = stopCamera;
+$('manualAdd').onclick = () => { addScan($('manual').value, 'typed', 'typed'); $('manual').value = ''; $('manual').focus(); };
+$('manual').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('manualAdd').click(); } });
+$('photo').addEventListener('change', e => scanPhoto(e.target.files && e.target.files[0]));
+window.addEventListener('online', () => { backoff = 0; render(); sync(); });
+window.addEventListener('offline', render);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && camOn) { stopCamera(); }
+  if (document.visibilityState === 'visible') { sync(); }
+});
+setInterval(() => { if (!syncing && scans.some(s => s.status !== 'saved')) sync(); }, 60000);
+
+render();
+if (!profile) openProfile();
+call('getConfig').then(c => {
+  if (c && c.ok) { config = { hubs: c.hubs, types: c.types, needsCode: c.needsCode }; store.set('zr_config', config); render(); }
+}).catch(() => {});
+sync();
+</script>
+</body>
+</html>
